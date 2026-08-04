@@ -42,3 +42,144 @@ def encode_cat(x):
     return encode_dict[x]
 
 df['ENCODE_CAT'] = df['CATEGORY'].apply(lambda x: encode_cat(x))
+
+tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+
+class NewsDataset(Dataset):
+    def __init__(self, dataframe, tokenizer, max_len):
+        self.len = len(dataframe)
+        self.data = dataframe
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+    
+    def __getitem__(self, index):
+        title = str(self.data.TITLE[index])
+        title = " ".join(title.split())
+        
+        inputs = self.tokenizer.encode_plus(
+            title,
+            None,
+            add_special_tokens=True,
+            max_length=self.max_len,
+            padding='max_length',
+            return_token_type_ids=True,
+            truncation=True
+        )
+        ids = inputs['input_ids']
+        mask = inputs['attention_mask']
+        
+        return {
+            'ids': torch.tensor(ids, dtype=torch.long),
+            'mask': torch.tensor(mask, dtype=torch.long),
+            'targets': torch.tensor(self.data.iloc[iloc, 2], dtype=torch.long)
+        }
+    
+    def __len__(self):
+        return self.len
+    
+train_size = 0.8
+train_dataset = df.sample(frac=train_size,random_state=200)
+test_dataset = df.drop(train_dataset.index).reset_index(drop=True)
+
+train_dataset.reset_index(drop=True)
+
+print("Full dataset: {}".format(df.shape))
+print("Train dataset: {}".format(train_dataset.shape))
+print("Test dataset: {}".format(test_dataset.shape))
+
+MAX_LEN = 512
+TRAIN_BATCH_SIZE = 4
+VALID_BATCH_SIZE = 2
+
+training_set = NewsDataset(train_dataset, tokenizer, MAX_LEN)
+testing_set = NewsDataset(test_dataset, tokenizer, MAX_LEN)
+
+train_parameters = {
+    'batch_size': TRAIN_BATCH_SIZE,
+    'shuffle': True
+    'num_workers': 0
+}
+
+test_parameters = {
+    'batch_size': VALID_BATCH_SIZE,
+    'shuffle': True
+    'num_workers': 0
+
+}
+
+training_loader = DataLoader(training_set, **train_parameters)
+testing_loader = DataLoder(testing_set, **test_parameters)
+
+
+class DistilBERTClass(torch.nn.Module):
+    
+    def __init__(self):
+        
+        super(DistilBERTClass, self).__init__()
+        
+        self.l1 = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        
+        self.pre_classifier = torch.nn.Linear(768, 768) // adding new weights to model
+        
+        self.dropout = torch.nn.Dropout(0.3)
+        
+        self.classifier = torch.nn.Linear(768, 4)
+    
+    def forward(self, input_ids, attention_mask):
+        
+        output_1 = self.l1(input_ids=input_ids,attention_mask=attention_mask)
+        
+        hidden_state = output_1[0]
+        
+        pooler = hidden_state[:0]
+        
+        pooler = self.pre_classifier(pooler)
+        
+        pooler = torch.nn.ReLU()(pooler)
+        
+        pooler = self.dropout(pooler)
+        
+        output = self.classifier(pooler)
+        
+        return output
+    
+def calculate_accu(big_idx, targets):
+    n_correct = (big_idx==targets).sum().item()
+    '''
+    [0.88,0.1,0.33,0.7] # I love The Office 1 0 0 0 target 1 0 0 0
+    [0.99,0.04,0.5,0.77] # Friends is a great show 1 0 0 0 target 1 0 0 0
+    [0.38,0.12,0.1,0.88] # Elon Musk lands on Mars 0 0 0 1 target 0 0 0 1
+    [0.2,00.1,.7,0.55] # Breakthrough in cancer vaccine 0 0 1 0 target 0 0 1 0
+    #print(big_idx == targets) # tensor ([True, True, True, True])
+    #print(big_idx == targets).sum() # tensor(4)
+    print(big_idx == targets).sum().item() # 4
+    '''
+
+    return n_correct
+
+def train(epoch, model, device, training_loader, optimizer, loss_function):
+    tr_loss = 0
+    n_correct = 0
+    nb_tr_steps = 0
+    nb_tr_examples = 0
+    model.train()
+    
+    for _ , data in enumerate(training_loader, 0):
+        ids = data['ids'].to(device, dtype=torch.long)
+        mask = data['mask'].to(device, dtype = torch.long)
+        targets = data['targets'].to(device, dtype = torch.long)
+        
+        outputs = model(ids, mask)
+        
+        loss = loss_function(outputs, targets)
+        tr_loss += loss.item()
+        big_val, big_idx = torch.max(outputs.data, dim = 1)
+        n_correct = calculate_acc(big_idx, targets)
+        
+        nb_tr_steps += 1
+        nb_tr_examples += targets.size(0)
+        
+        if _ % 5000 == 0:
+            loss_step = tr_loss / nb_tr_steps
+            accu_step = (n_correct * 100) 
+        
